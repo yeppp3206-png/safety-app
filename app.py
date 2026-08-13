@@ -3,37 +3,69 @@ import chromadb
 import google.generativeai as genai
 from PIL import Image
 from datetime import date
+import os  # 추가된 부분
 
 st.set_page_config(page_title="현장 안전 AI", page_icon="🛡️")
 
 st.title("🛡️ 현장 안전 AI")
 st.caption("안전 법령, 인간공학 평가, 화학물질(MSDS) 관리까지 책임지는 현장 맞춤형 AI 솔루션입니다.")
 
-# 1️⃣ 오늘 날짜 상단 표시
 today = date.today().strftime("%Y년 %m월 %d일")
 st.info(f"📅 오늘 날짜: {today}")
 
-# 2️⃣ 사업장 종류 선택
 industry_type = st.radio(
     "📍 현재 사업장의 종류를 선택하세요:",
     ("제조업", "건설업", "기타"),
     horizontal=True
 )
 
-# API 키 설정
 DEFAULT_API_KEY = "AQ.Ab8RN6IwA9MlrglPVZVM1NXA3JOJviDPDwbST2t-x6AI7IzANA"
 api_key_input = st.sidebar.text_input("Gemini API Key", value=DEFAULT_API_KEY, type="password")
 api_key = api_key_input.strip() if api_key_input else DEFAULT_API_KEY
 
+# ==========================================
+# 💡 핵심 수정 부분: DB 자동 구축 로직
+# ==========================================
 @st.cache_resource
 def load_db():
-    client = chromadb.PersistentClient(path="./safety_db")
-    return client.get_collection(name="safety_rules")
+    db_path = "./safety_db"
+    
+    # 만약 safety_db 폴더가 없다면, 그 자리에서 바로 DB를 만듭니다!
+    if not os.path.exists(db_path):
+        st.toast("⚠️ 법령 데이터베이스를 처음 구축하는 중입니다. (약 30초 소요)")
+        client = chromadb.PersistentClient(path=db_path)
+        collection = client.get_or_create_collection(name="safety_rules")
+        
+        file_list = ["법.txt", "시행령.txt", "시행규칙.txt", "안전보건기준.txt", "중대재해처벌법.txt"]
+        all_documents = []
+        
+        for file_name in file_list:
+            if os.path.exists(file_name):
+                with open(file_name, "r", encoding="utf-8") as f:
+                    content = f.read()
+                raw_documents = content.split("\n\n")
+                law_title = file_name.replace(".txt", "")
+                
+                for doc in raw_documents:
+                    doc = doc.strip()
+                    if len(doc) > 10:
+                        all_documents.append(f"[{law_title}] {doc}")
+        
+        if all_documents:
+            ids = [f"rule_v4_{i+1}" for i in range(len(all_documents))]
+            collection.add(documents=all_documents, ids=ids)
+            st.toast("✅ 데이터베이스 구축 완료!")
+        return collection
+    else:
+        # 이미 DB가 있으면 그냥 불러옵니다.
+        client = chromadb.PersistentClient(path=db_path)
+        return client.get_collection(name="safety_rules")
 
+# 이제 여기서 에러가 나서 멈추지 않고, 위 함수를 통해 자동으로 DB를 만들게 됩니다.
 try:
     collection = load_db()
-except Exception:
-    st.error("⚠️ 먼저 python build_db.py를 실행하세요.")
+except Exception as e:
+    st.error(f"⚠️ 데이터베이스 로드 중 오류 발생: {e}")
     st.stop()
 
 def get_ai_model():
@@ -46,12 +78,8 @@ def get_ai_model():
             break
     return genai.GenerativeModel(valid_model_name), valid_model_name
 
-# 💡 탭 3개로 확장
 tab1, tab2, tab3 = st.tabs(["🔍 일반 위험 분석", "🧍‍♂️ 인간공학 평가", "🧪 화학물질(MSDS) 안전 관리"])
 
-# ==========================================
-# 탭 1: 일반 위험 분석하기
-# ==========================================
 with tab1:
     st.subheader("일반 위험 요소 분석")
     image_file = st.file_uploader("📷 현장 사진 업로드 (선택사항)", type=["jpg", "jpeg", "png"], key="general_img")
@@ -115,9 +143,6 @@ with tab1:
             except Exception as e:
                 st.error(f"❌ 분석 중 오류 발생:\n\n{e}")
 
-# ==========================================
-# 탭 2: 인간공학적 자세 평가
-# ==========================================
 with tab2:
     st.subheader("🧍‍♂️ 작업자 자세 인간공학(Ergonomics) 분석")
     st.caption("사진과 현장 정보를 종합하여 가장 적합한 인간공학 기법(OWAS/REBA/RULA)으로 평가합니다.")
@@ -163,14 +188,10 @@ with tab2:
             except Exception as e:
                 st.error(f"❌ 분석 중 오류 발생:\n\n{e}")
 
-# ==========================================
-# 탭 3: 화학물질(MSDS) AI 어드바이저 (NEW!)
-# ==========================================
 with tab3:
     st.subheader("🧪 맞춤형 화학물질(MSDS) 안전 및 설비 누출 대응")
     st.caption("화학물질 정보와 작업 환경을 입력하면, 보건 조치와 설비 안전 대책을 통합 분석해 드립니다.")
     
-    # 화학물질 라벨 사진 (옵션)
     image_file_chem = st.file_uploader("📷 용기 라벨/GHS 마크 사진 업로드 (선택)", type=["jpg", "jpeg", "png"], key="chem_img")
     
     col_c1, col_c2 = st.columns(2)
@@ -188,8 +209,6 @@ with tab3:
             try:
                 with st.spinner(f"'{chem_name}'의 유해성(보건) 및 설비 위험성을 종합 분석 중입니다..."):
                     model, model_name = get_ai_model()
-                    
-                    # 프롬프트 구성 (사진이 있으면 사진 포함)
                     prompt_chem = f"""
                     당신은 산업위생관리 및 화학설비안전 최고 전문가입니다.
                     아래 제공된 화학물질 정보와 작업 환경(설비 상태)을 종합하여 현장 맞춤형 MSDS 브리핑을 작성하세요.
@@ -203,19 +222,10 @@ with tab3:
                     아래 양식에 맞춰 전문적이고 직관적인 리포트를 작성하세요:
 
                     ### 1. ☠️ 유해성·위험성 요약 (GHS 기준)
-                    (입력된 물질의 주요 건강 유해성, 물리화학적 위험성 요약)
-
                     ### 2. 🥽 필수 개인보호구(PPE) 및 보건 조치
-                    ({work_env} 환경을 고려하여 방독마스크 종류, 보호복 재질 등 구체적으로 제시)
-
                     ### 3. 🏭 설비 안전 및 취급 시 주의사항
-                    (이 물질이 배관/탱크 등 설비에 미치는 영향(예: 부식성), {work_temp} 공정에서 폭발/화재를 막기 위한 설비 안전 장치 제안)
-
                     ### 4. 🚨 누출 시 응급조치 요령
-                    (현장에서 소량 또는 대량 누출 시 근로자가 즉각적으로 취해야 할 대피 및 응급 처치 행동 요령)
                     """
-                    
-                    # 사진 유무에 따른 모델 호출
                     if image_file_chem:
                         image_chem = Image.open(image_file_chem)
                         chem_response = model.generate_content([prompt_chem, image_chem])
@@ -225,6 +235,5 @@ with tab3:
                     st.info(f"**[분석 대상]** 물질: {chem_name} ({chem_conc}) | 환경: {work_env} | 온도: {work_temp}")
                     st.markdown("---")
                     st.success(chem_response.text)
-                    
             except Exception as e:
                 st.error(f"❌ 분석 중 오류 발생:\n\n{e}")
