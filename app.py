@@ -21,7 +21,7 @@ industry_type = st.radio(
     horizontal=True
 )
 
-# API 키 설정
+# API 키 설정 (새로 발급받으신 키 반영)
 DEFAULT_API_KEY = "AQ.Ab8RN6I-ZlGk3t75sVY4BVRlpEajZ95DpOLb2_6qTZq39KDGQg"
 api_key_input = st.sidebar.text_input("Gemini API Key", value=DEFAULT_API_KEY, type="password")
 api_key = api_key_input.strip() if api_key_input else DEFAULT_API_KEY
@@ -82,17 +82,22 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# AI 모델 설정
+# 💡 AI 모델 설정 (404 에러 원천 차단형)
 # ==========================================
 def get_ai_model():
     genai.configure(api_key=api_key)
-    valid_model_name = "gemini-1.5-flash-latest"
-    available_models = [m for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-    for m in available_models:
-        if 'flash' in m.name and '2.5' not in m.name and '2.0' not in m.name:
-            valid_model_name = m.name.replace('models/', '')
-            break
-    return genai.GenerativeModel(valid_model_name), valid_model_name
+    # 404 에러를 유발하는 동적 리스트 조회를 없애고 가장 안정적인 모델 지정
+    model_candidates = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+    
+    for m_name in model_candidates:
+        try:
+            model = genai.GenerativeModel(m_name)
+            return model, m_name
+        except Exception:
+            continue
+            
+    # 최후의 보조 수단
+    return genai.GenerativeModel("gemini-1.5-flash"), "gemini-1.5-flash"
 
 # 3개의 탭 구성
 tab1, tab2, tab3 = st.tabs(["🔍 일반 위험 분석", "🧍‍♂️ 인간공학 평가", "🧪 화학물질(MSDS) 안전 관리"])
