@@ -27,7 +27,7 @@ api_key_input = st.sidebar.text_input("Gemini API Key", value=DEFAULT_API_KEY, t
 api_key = api_key_input.strip() if api_key_input else DEFAULT_API_KEY
 
 # ==========================================
-# 💡 완벽한 DB 자동 구축 로직 (에러 완벽 차단)
+# 💡 UI 요소를 완전히 배제하여 에러를 차단한 DB 로직
 # ==========================================
 @st.cache_resource
 def load_db():
@@ -45,8 +45,8 @@ def load_db():
         return collection
 
     except Exception:
-        # 3. 데이터가 아예 없거나 에러가 나면 여기서 즉시 새로 구축
-        st.toast("⚠️ 법령 데이터베이스를 처음 구축하는 중입니다. (약 30~60초 소요)")
+        # 3. 화면 UI(st.toast 등) 대신 콘솔 출력(print) 사용으로 충돌 방지
+        print("⚠️ 법령 데이터베이스를 처음 구축하는 중입니다...")
         collection = client.get_or_create_collection(name="safety_rules")
         
         file_list = ["법.txt", "시행령.txt", "시행규칙.txt", "안전보건기준.txt", "중대재해처벌법.txt"]
@@ -65,28 +65,27 @@ def load_db():
                         all_documents.append(f"[{law_title}] {doc}")
         
         if all_documents:
-            # 고유 ID 생성 후 DB에 일괄 추가
             ids = [f"rule_v5_{i+1}" for i in range(len(all_documents))]
             collection.add(documents=all_documents, ids=ids)
-            st.toast("✅ 데이터베이스 구축 완료!")
+            print("✅ 데이터베이스 구축 완료!")
         else:
-            st.warning("⚠️ 깃허브 창고에 법령 텍스트 파일(법.txt 등)이 하나도 없습니다! 파일을 올려주세요.")
+            print("⚠️ 깃허브 창고에 법령 텍스트 파일(법.txt 등)이 없습니다!")
             
         return collection
 
-# DB 로딩 실행
-try:
-    collection = load_db()
-except Exception as e:
-    st.error(f"⚠️ 데이터베이스 로드 중 알 수 없는 오류 발생: {e}")
-    st.stop()
+# DB 로딩 실행 (스피너는 바깥쪽에 위치하여 안전함)
+with st.spinner("법령 데이터베이스를 점검 및 준비 중입니다... (최초 1회 약 30초 소요)"):
+    try:
+        collection = load_db()
+    except Exception as e:
+        st.error(f"⚠️ 데이터베이스 로드 중 알 수 없는 오류 발생: {e}")
+        st.stop()
 
 # ==========================================
-# 💡 AI 모델 설정 (404 에러 원천 차단형)
+# AI 모델 설정 (안정형)
 # ==========================================
 def get_ai_model():
     genai.configure(api_key=api_key)
-    # 404 에러를 유발하는 동적 리스트 조회를 없애고 가장 안정적인 모델 지정
     model_candidates = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
     
     for m_name in model_candidates:
@@ -96,7 +95,6 @@ def get_ai_model():
         except Exception:
             continue
             
-    # 최후의 보조 수단
     return genai.GenerativeModel("gemini-1.5-flash"), "gemini-1.5-flash"
 
 # 3개의 탭 구성
