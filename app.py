@@ -56,7 +56,7 @@ def load_db():
                         all_documents.append(f"[{law_title}] {doc}")
         
         if all_documents:
-            ids = [f"rule_v10_{i+1}" for i in range(len(all_documents))]
+            ids = [f"rule_v11_{i+1}" for i in range(len(all_documents))]
             collection.add(documents=all_documents, ids=ids)
         return collection
 
@@ -68,11 +68,23 @@ with st.spinner("데이터베이스를 준비 중입니다..."):
         st.stop()
 
 # ==========================================
-# 💡 최신 표준 모델 지정 (gemini-2.5-flash)
+# 💡 스마트 자동 Fallback 모델 호출 함수 (404 원천 차단)
 # ==========================================
-def get_ai_model():
+def call_gemini(contents):
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-2.5-flash")
+    # 사용 가능한 안정적인 모델 후보군 (앞순서부터 차례대로 시도)
+    candidate_models = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.0-pro"]
+    
+    last_error = None
+    for m_name in candidate_models:
+        try:
+            model = genai.GenerativeModel(m_name)
+            return model.generate_content(contents)
+        except Exception as e:
+            last_error = e
+            continue
+            
+    raise Exception(f"모든 Gemini 모델 호출에 실패했습니다. (마지막 에러: {last_error})")
 
 # 3개의 탭 구성
 tab1, tab2, tab3 = st.tabs(["🔍 일반 위험 분석", "🧍‍♂️ 인간공학 평가", "🧪 화학물질(MSDS) 안전 관리"])
@@ -91,7 +103,6 @@ with tab1:
         else:
             try:
                 with st.spinner("AI 분석 중..."):
-                    model = get_ai_model()
                     keyword = context_input.strip() if context_input else "일반 안전"
                     results = collection.query(query_texts=[f"{industry_type} {keyword}"], n_results=2)
                     matched_rules = "\n\n".join(results['documents'][0])
@@ -109,7 +120,7 @@ with tab1:
                         ### 3. 🚨 위반 시 불이익 (과태료, 처벌 등)
                         ### 4. 🛠️ 권장 시정 조치
                         """
-                        response = model.generate_content([prompt, image])
+                        response = call_gemini([prompt, image])
                         st.markdown("---")
                         st.success(response.text)
                     else:
@@ -124,7 +135,7 @@ with tab1:
                         ### 4. 🛠️ 권장 시정 조치 및 안전 수칙
                         ### 5. 🗣️ 근로자 현장 계도 멘트 (친근한 구어체)
                         """
-                        response = model.generate_content(prompt)
+                        response = call_gemini(prompt)
                         st.markdown("---")
                         st.success(response.text)
             except Exception as e:
@@ -144,9 +155,8 @@ with tab2:
         if st.button("인간공학 분석 시작", type="primary", key="ergo_btn"):
             try:
                 with st.spinner("자세 부하 분석 중..."):
-                    model = get_ai_model()
                     prompt = "당신은 인간공학 전문가입니다. 사진 속 작업자의 자세를 OWAS 또는 REBA/RULA 기법 관점에서 평가하고, 신체 부위별 부하 분석 및 작업환경 개선 대책을 리포트로 작성하세요."
-                    response = model.generate_content([prompt, image])
+                    response = call_gemini([prompt, image])
                     st.markdown("---")
                     st.success(response.text)
             except Exception as e:
@@ -165,7 +175,6 @@ with tab3:
         else:
             try:
                 with st.spinner("MSDS 및 설비 위험성 분석 중..."):
-                    model = get_ai_model()
                     prompt = f"""
                     당신은 산업위생관리 및 화학설비안전 전문가입니다.
                     화학물질 '{c_name}'에 대하여 아래 양식으로 리포트를 작성하세요:
@@ -174,7 +183,7 @@ with tab3:
                     ### 3. 🏭 설비 안전 및 취급 시 주의사항
                     ### 4. 🚨 누출 시 응급조치 요령
                     """
-                    response = model.generate_content(prompt)
+                    response = call_gemini(prompt)
                     st.markdown("---")
                     st.success(response.text)
             except Exception as e:
