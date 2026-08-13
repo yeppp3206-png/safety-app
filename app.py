@@ -3,37 +3,50 @@ import chromadb
 import google.generativeai as genai
 from PIL import Image
 from datetime import date
-import os  # 추가된 부분
+import os
 
 st.set_page_config(page_title="현장 안전 AI", page_icon="🛡️")
 
 st.title("🛡️ 현장 안전 AI")
 st.caption("안전 법령, 인간공학 평가, 화학물질(MSDS) 관리까지 책임지는 현장 맞춤형 AI 솔루션입니다.")
 
+# 1️⃣ 오늘 날짜 상단 표시
 today = date.today().strftime("%Y년 %m월 %d일")
 st.info(f"📅 오늘 날짜: {today}")
 
+# 2️⃣ 사업장 종류 선택
 industry_type = st.radio(
     "📍 현재 사업장의 종류를 선택하세요:",
     ("제조업", "건설업", "기타"),
     horizontal=True
 )
 
+# API 키 설정
 DEFAULT_API_KEY = "AQ.Ab8RN6IwA9MlrglPVZVM1NXA3JOJviDPDwbST2t-x6AI7IzANA"
 api_key_input = st.sidebar.text_input("Gemini API Key", value=DEFAULT_API_KEY, type="password")
 api_key = api_key_input.strip() if api_key_input else DEFAULT_API_KEY
 
 # ==========================================
-# 💡 핵심 수정 부분: DB 자동 구축 로직
+# 💡 완벽한 DB 자동 구축 로직 (에러 완벽 차단)
 # ==========================================
 @st.cache_resource
 def load_db():
     db_path = "./safety_db"
+    client = chromadb.PersistentClient(path=db_path)
     
-    # 만약 safety_db 폴더가 없다면, 그 자리에서 바로 DB를 만듭니다!
-    if not os.path.exists(db_path):
-        st.toast("⚠️ 법령 데이터베이스를 처음 구축하는 중입니다. (약 30초 소요)")
-        client = chromadb.PersistentClient(path=db_path)
+    try:
+        # 1. 기존 데이터베이스(컬렉션) 가져오기 시도
+        collection = client.get_collection(name="safety_rules")
+        
+        # 2. 껍데기만 있고 데이터가 0개면 에러 발생시켜서 다시 만들게 유도
+        if collection.count() == 0:
+            raise ValueError("데이터베이스가 비어있습니다.")
+            
+        return collection
+
+    except Exception:
+        # 3. 데이터가 아예 없거나 에러가 나면 여기서 즉시 새로 구축
+        st.toast("⚠️ 법령 데이터베이스를 처음 구축하는 중입니다. (약 30~60초 소요)")
         collection = client.get_or_create_collection(name="safety_rules")
         
         file_list = ["법.txt", "시행령.txt", "시행규칙.txt", "안전보건기준.txt", "중대재해처벌법.txt"]
@@ -52,22 +65,25 @@ def load_db():
                         all_documents.append(f"[{law_title}] {doc}")
         
         if all_documents:
-            ids = [f"rule_v4_{i+1}" for i in range(len(all_documents))]
+            # 고유 ID 생성 후 DB에 일괄 추가
+            ids = [f"rule_v5_{i+1}" for i in range(len(all_documents))]
             collection.add(documents=all_documents, ids=ids)
             st.toast("✅ 데이터베이스 구축 완료!")
+        else:
+            st.warning("⚠️ 깃허브 창고에 법령 텍스트 파일(법.txt 등)이 하나도 없습니다! 파일을 올려주세요.")
+            
         return collection
-    else:
-        # 이미 DB가 있으면 그냥 불러옵니다.
-        client = chromadb.PersistentClient(path=db_path)
-        return client.get_collection(name="safety_rules")
 
-# 이제 여기서 에러가 나서 멈추지 않고, 위 함수를 통해 자동으로 DB를 만들게 됩니다.
+# DB 로딩 실행
 try:
     collection = load_db()
 except Exception as e:
-    st.error(f"⚠️ 데이터베이스 로드 중 오류 발생: {e}")
+    st.error(f"⚠️ 데이터베이스 로드 중 알 수 없는 오류 발생: {e}")
     st.stop()
 
+# ==========================================
+# AI 모델 설정
+# ==========================================
 def get_ai_model():
     genai.configure(api_key=api_key)
     valid_model_name = "gemini-1.5-flash-latest"
@@ -78,8 +94,12 @@ def get_ai_model():
             break
     return genai.GenerativeModel(valid_model_name), valid_model_name
 
+# 3개의 탭 구성
 tab1, tab2, tab3 = st.tabs(["🔍 일반 위험 분석", "🧍‍♂️ 인간공학 평가", "🧪 화학물질(MSDS) 안전 관리"])
 
+# ==========================================
+# 탭 1: 일반 위험 분석하기
+# ==========================================
 with tab1:
     st.subheader("일반 위험 요소 분석")
     image_file = st.file_uploader("📷 현장 사진 업로드 (선택사항)", type=["jpg", "jpeg", "png"], key="general_img")
@@ -96,11 +116,14 @@ with tab1:
             try:
                 with st.spinner("AI가 상황을 분석하고 법령을 찾는 중..."):
                     model, model_name = get_ai_model()
+                    
                     if image_file:
                         image = Image.open(image_file)
                         st.image(image, caption="업로드된 사진", use_container_width=True)
+                        
                         context_prompt = f"이 사진의 추가 상황 설명: {context_input}" if context_input.strip() else "추가 설명 없음."
                         prompt_vision = f"당신은 {industry_type} 산업안전 전문가입니다. 사진 속 위험한 행동이나 설비 상태를 분석하세요. [추가 상황 설명]: {context_prompt}. 이를 종합하여 2문장으로 간결하게 요약하세요."
+                        
                         vision_response = model.generate_content([prompt_vision, image])
                         detected_risk = vision_response.text
                         st.info(f"**[탐지된 위험 요소]**\n\n{detected_risk}")
@@ -112,6 +135,7 @@ with tab1:
                         [사업장 종류]: {industry_type}
                         [위험 상황 요약]: {detected_risk}
                         [관련 법령 (검색결과)]: {matched_rules}
+                        
                         위 내용을 바탕으로 현장 지도 리포트를 아래 양식으로 작성하세요.
                         ### 1. 🗣️ 근로자 현장 계도 멘트 (친근하고 경각심을 주는 구어체, 최우선 출력)
                         ### 2. 📜 위반/관련 법조항 및 근거
@@ -121,14 +145,17 @@ with tab1:
                         report_response = model.generate_content(prompt_report)
                         st.markdown("---")
                         st.success(report_response.text)
+                    
                     else:
                         search_keyword = context_input.strip()
                         results = collection.query(query_texts=[f"{industry_type} {search_keyword}"], n_results=2)
                         matched_rules = "\n\n".join(results['documents'][0])
+                        
                         prompt_keyword = f"""
                         [사업장 종류]: {industry_type}
                         [입력된 상황/키워드]: {search_keyword}
                         [관련 법령 (검색결과)]: {matched_rules}
+                        
                         정보 전달에 초점을 맞춰 아래 양식으로 안내서를 작성하세요.
                         ### 1. 📜 관련 법조항 요약 및 근거 (가장 최우선 배치)
                         ### 2. ⚠️ 자주 발생하는 잘못된 행동/상태 예시 (2가지)
@@ -140,9 +167,13 @@ with tab1:
                         st.info(f"**['{search_keyword}'] 관련 분석 결과**")
                         st.markdown("---")
                         st.success(keyword_response.text)
+                        
             except Exception as e:
                 st.error(f"❌ 분석 중 오류 발생:\n\n{e}")
 
+# ==========================================
+# 탭 2: 인간공학적 자세 평가
+# ==========================================
 with tab2:
     st.subheader("🧍‍♂️ 작업자 자세 인간공학(Ergonomics) 분석")
     st.caption("사진과 현장 정보를 종합하여 가장 적합한 인간공학 기법(OWAS/REBA/RULA)으로 평가합니다.")
@@ -165,6 +196,7 @@ with tab2:
             try:
                 with st.spinner("AI가 작업 부하 인자들을 종합하여 정밀 평가표를 작성 중입니다..."):
                     model, model_name = get_ai_model()
+                    
                     prompt_ergo = f"""
                     당신은 {industry_type} 현장의 인간공학(Ergonomics) 전문가입니다.
                     사진과 아래의 [작업 부하 및 환경 정보]를 바탕으로 'OWAS', 'REBA', 'RULA' 중 가장 적합한 기법을 하나 선택하세요.
@@ -181,13 +213,19 @@ with tab2:
                     ### 3. 📊 추정 조치 단계 (Action Level) - [마크다운 표 포함]
                     ### 4. 🛠️ 인간공학적 작업환경 개선 대책
                     """
+                    
                     ergo_response = model.generate_content([prompt_ergo, image_ergo])
+                    
                     st.info(f"**[적용된 현장 인자]** 무게: {load_weight}kg | 빈도: {work_frequency} | 그립: {grip_status} | 진동: {vibration_status}")
                     st.markdown("---")
                     st.success(ergo_response.text)
+                    
             except Exception as e:
                 st.error(f"❌ 분석 중 오류 발생:\n\n{e}")
 
+# ==========================================
+# 탭 3: 화학물질(MSDS) AI 어드바이저
+# ==========================================
 with tab3:
     st.subheader("🧪 맞춤형 화학물질(MSDS) 안전 및 설비 누출 대응")
     st.caption("화학물질 정보와 작업 환경을 입력하면, 보건 조치와 설비 안전 대책을 통합 분석해 드립니다.")
@@ -209,6 +247,7 @@ with tab3:
             try:
                 with st.spinner(f"'{chem_name}'의 유해성(보건) 및 설비 위험성을 종합 분석 중입니다..."):
                     model, model_name = get_ai_model()
+                    
                     prompt_chem = f"""
                     당신은 산업위생관리 및 화학설비안전 최고 전문가입니다.
                     아래 제공된 화학물질 정보와 작업 환경(설비 상태)을 종합하여 현장 맞춤형 MSDS 브리핑을 작성하세요.
@@ -226,6 +265,7 @@ with tab3:
                     ### 3. 🏭 설비 안전 및 취급 시 주의사항
                     ### 4. 🚨 누출 시 응급조치 요령
                     """
+                    
                     if image_file_chem:
                         image_chem = Image.open(image_file_chem)
                         chem_response = model.generate_content([prompt_chem, image_chem])
@@ -235,5 +275,6 @@ with tab3:
                     st.info(f"**[분석 대상]** 물질: {chem_name} ({chem_conc}) | 환경: {work_env} | 온도: {work_temp}")
                     st.markdown("---")
                     st.success(chem_response.text)
+                    
             except Exception as e:
                 st.error(f"❌ 분석 중 오류 발생:\n\n{e}")
