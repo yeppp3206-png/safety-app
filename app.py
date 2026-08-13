@@ -21,7 +21,7 @@ industry_type = st.radio(
     horizontal=True
 )
 
-# API 키 설정 (새로 발급받으신 키 반영)
+# API 키 설정
 DEFAULT_API_KEY = "AQ.Ab8RN6I-ZlGk3t75sVY4BVRlpEajZ95DpOLb2_6qTZq39KDGQg"
 api_key_input = st.sidebar.text_input("Gemini API Key", value=DEFAULT_API_KEY, type="password")
 api_key = api_key_input.strip() if api_key_input else DEFAULT_API_KEY
@@ -75,30 +75,12 @@ with st.spinner("법령 데이터베이스를 준비 중입니다..."):
         st.stop()
 
 # ==========================================
-# 💡 사용자 계정 맞춤형 모델 자동 호출 함수
+# 💡 [속도 최적화] 모델 탐색 없이 즉시 연결
 # ==========================================
 def call_gemini(contents):
     genai.configure(api_key=api_key)
-    # 보내주신 계정 모델 목록에 확실히 존재하는 모델들로 후보군 구성
-    candidates = [
-        "gemini-2.5-flash",
-        "gemini-3.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-3.1-flash-lite",
-        "gemini-3.6-flash",
-        "gemini-2.5-pro"
-    ]
-    
-    last_err = None
-    for m_name in candidates:
-        try:
-            model = genai.GenerativeModel(m_name)
-            return model.generate_content(contents)
-        except Exception as e:
-            last_err = e
-            continue
-            
-    raise Exception(f"모든 AI 모델 호출에 실패했습니다. (마지막 에러: {last_err})")
+    model = genai.GenerativeModel("gemini-2.5-flash")
+    return model.generate_content(contents)
 
 # 3개의 탭 구성
 tab1, tab2, tab3 = st.tabs(["🔍 일반 위험 분석", "🧍‍♂️ 인간공학 평가", "🧪 화학물질(MSDS) 안전 관리"])
