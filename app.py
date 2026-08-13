@@ -35,17 +35,11 @@ def load_db():
     client = chromadb.PersistentClient(path=db_path)
     
     try:
-        # 1. 기존 데이터베이스(컬렉션) 가져오기 시도
         collection = client.get_collection(name="safety_rules")
-        
-        # 2. 껍데기만 있고 데이터가 0개면 에러 발생시켜서 다시 만들게 유도
         if collection.count() == 0:
             raise ValueError("데이터베이스가 비어있습니다.")
-            
         return collection
-
     except Exception:
-        # 3. 화면 UI(st.toast 등) 대신 콘솔 출력(print) 사용으로 충돌 방지
         print("⚠️ 법령 데이터베이스를 처음 구축하는 중입니다...")
         collection = client.get_or_create_collection(name="safety_rules")
         
@@ -73,7 +67,6 @@ def load_db():
             
         return collection
 
-# DB 로딩 실행 (스피너는 바깥쪽에 위치하여 안전함)
 with st.spinner("법령 데이터베이스를 점검 및 준비 중입니다... (최초 1회 약 30초 소요)"):
     try:
         collection = load_db()
@@ -82,20 +75,23 @@ with st.spinner("법령 데이터베이스를 점검 및 준비 중입니다... 
         st.stop()
 
 # ==========================================
-# AI 모델 설정 (안정형)
+# 💡 404 에러 원천 차단형 실시간 Fallback 호출 함수
 # ==========================================
-def get_ai_model():
+def call_gemini(contents):
     genai.configure(api_key=api_key)
-    model_candidates = ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+    # gemini-2.0-flash를 최우선으로 시도하고 실패 시 순차적으로 대체
+    candidates = ["gemini-2.0-flash", "gemini-1.5-flash", "gemini-1.5-pro", "gemini-1.0-pro"]
     
-    for m_name in model_candidates:
+    last_err = None
+    for m_name in candidates:
         try:
             model = genai.GenerativeModel(m_name)
-            return model, m_name
-        except Exception:
+            return model.generate_content(contents)
+        except Exception as e:
+            last_err = e
             continue
             
-    return genai.GenerativeModel("gemini-1.5-flash"), "gemini-1.5-flash"
+    raise Exception(f"모든 AI 모델 호출에 실패했습니다. (마지막 에러: {last_err})")
 
 # 3개의 탭 구성
 tab1, tab2, tab3 = st.tabs(["🔍 일반 위험 분석", "🧍‍♂️ 인간공학 평가", "🧪 화학물질(MSDS) 안전 관리"])
@@ -118,8 +114,6 @@ with tab1:
         else:
             try:
                 with st.spinner("AI가 상황을 분석하고 법령을 찾는 중..."):
-                    model, model_name = get_ai_model()
-                    
                     if image_file:
                         image = Image.open(image_file)
                         st.image(image, caption="업로드된 사진", use_container_width=True)
@@ -127,7 +121,7 @@ with tab1:
                         context_prompt = f"이 사진의 추가 상황 설명: {context_input}" if context_input.strip() else "추가 설명 없음."
                         prompt_vision = f"당신은 {industry_type} 산업안전 전문가입니다. 사진 속 위험한 행동이나 설비 상태를 분석하세요. [추가 상황 설명]: {context_prompt}. 이를 종합하여 2문장으로 간결하게 요약하세요."
                         
-                        vision_response = model.generate_content([prompt_vision, image])
+                        vision_response = call_gemini([prompt_vision, image])
                         detected_risk = vision_response.text
                         st.info(f"**[탐지된 위험 요소]**\n\n{detected_risk}")
                         
@@ -145,7 +139,7 @@ with tab1:
                         ### 3. 🚨 위반 시 불이익 (과태료, 처벌 등)
                         ### 4. 🛠️ 권장 시정 조치
                         """
-                        report_response = model.generate_content(prompt_report)
+                        report_response = call_gemini(prompt_report)
                         st.markdown("---")
                         st.success(report_response.text)
                     
@@ -166,7 +160,7 @@ with tab1:
                         ### 4. 🛠️ 권장 시정 조치 및 안전 수칙
                         ### 5. 🗣️ 근로자 현장 계도 멘트 (친근한 구어체)
                         """
-                        keyword_response = model.generate_content(prompt_keyword)
+                        keyword_response = call_gemini(prompt_keyword)
                         st.info(f"**['{search_keyword}'] 관련 분석 결과**")
                         st.markdown("---")
                         st.success(keyword_response.text)
@@ -198,8 +192,6 @@ with tab2:
         if st.button("인간공학 정밀 분석 시작", type="primary", key="ergo_btn"):
             try:
                 with st.spinner("AI가 작업 부하 인자들을 종합하여 정밀 평가표를 작성 중입니다..."):
-                    model, model_name = get_ai_model()
-                    
                     prompt_ergo = f"""
                     당신은 {industry_type} 현장의 인간공학(Ergonomics) 전문가입니다.
                     사진과 아래의 [작업 부하 및 환경 정보]를 바탕으로 'OWAS', 'REBA', 'RULA' 중 가장 적합한 기법을 하나 선택하세요.
@@ -217,7 +209,7 @@ with tab2:
                     ### 4. 🛠️ 인간공학적 작업환경 개선 대책
                     """
                     
-                    ergo_response = model.generate_content([prompt_ergo, image_ergo])
+                    ergo_response = call_gemini([prompt_ergo, image_ergo])
                     
                     st.info(f"**[적용된 현장 인자]** 무게: {load_weight}kg | 빈도: {work_frequency} | 그립: {grip_status} | 진동: {vibration_status}")
                     st.markdown("---")
@@ -249,8 +241,6 @@ with tab3:
         else:
             try:
                 with st.spinner(f"'{chem_name}'의 유해성(보건) 및 설비 위험성을 종합 분석 중입니다..."):
-                    model, model_name = get_ai_model()
-                    
                     prompt_chem = f"""
                     당신은 산업위생관리 및 화학설비안전 최고 전문가입니다.
                     아래 제공된 화학물질 정보와 작업 환경(설비 상태)을 종합하여 현장 맞춤형 MSDS 브리핑을 작성하세요.
@@ -271,9 +261,9 @@ with tab3:
                     
                     if image_file_chem:
                         image_chem = Image.open(image_file_chem)
-                        chem_response = model.generate_content([prompt_chem, image_chem])
+                        chem_response = call_gemini([prompt_chem, image_chem])
                     else:
-                        chem_response = model.generate_content(prompt_chem)
+                        chem_response = call_gemini(prompt_chem)
                     
                     st.info(f"**[분석 대상]** 물질: {chem_name} ({chem_conc}) | 환경: {work_env} | 온도: {work_temp}")
                     st.markdown("---")
