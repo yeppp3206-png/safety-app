@@ -56,7 +56,7 @@ def load_db():
                         all_documents.append(f"[{law_title}] {doc}")
         
         if all_documents:
-            ids = [f"rule_v9_{i+1}" for i in range(len(all_documents))]
+            ids = [f"rule_v10_{i+1}" for i in range(len(all_documents))]
             collection.add(documents=all_documents, ids=ids)
         return collection
 
@@ -68,11 +68,11 @@ with st.spinner("데이터베이스를 준비 중입니다..."):
         st.stop()
 
 # ==========================================
-# 💡 안정적인 표준 모델 명시 (오류 원천 차단)
+# 💡 최신 표준 모델 지정 (gemini-2.5-flash)
 # ==========================================
 def get_ai_model():
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel("gemini-1.5-flash")
+    return genai.GenerativeModel("gemini-2.5-flash")
 
 # 3개의 탭 구성
 tab1, tab2, tab3 = st.tabs(["🔍 일반 위험 분석", "🧍‍♂️ 인간공학 평가", "🧪 화학물질(MSDS) 안전 관리"])
