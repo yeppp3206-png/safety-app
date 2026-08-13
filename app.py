@@ -22,7 +22,7 @@ industry_type = st.radio(
 )
 
 # API 키 설정
-DEFAULT_API_KEY = "AQ.Ab8RN6IwA9MlrglPVZVM1NXA3JOJviDPDwbST2t-x6AI7IzANA"
+DEFAULT_API_KEY = "AQ.Ab8RN6KMGCo5J8I3VWzSagqowvPwr4Oyxo2VZSzuN7KGRJPKpA"
 api_key_input = st.sidebar.text_input("Gemini API Key", value=DEFAULT_API_KEY, type="password")
 api_key = api_key_input.strip() if api_key_input else DEFAULT_API_KEY
 
