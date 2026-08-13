@@ -27,7 +27,7 @@ api_key_input = st.sidebar.text_input("Gemini API Key", value=DEFAULT_API_KEY, t
 api_key = api_key_input.strip() if api_key_input else DEFAULT_API_KEY
 
 # ==========================================
-# 💡 완벽한 DB 자동 구축 로직 (에러 완벽 차단)
+# 💡 UI 출력을 빼서 에러를 완벽 차단한 DB 구축 로직
 # ==========================================
 @st.cache_resource
 def load_db():
@@ -35,18 +35,15 @@ def load_db():
     client = chromadb.PersistentClient(path=db_path)
     
     try:
-        # 1. 기존 데이터베이스(컬렉션) 가져오기 시도
+        # 1. 기존 데이터베이스 가져오기 시도
         collection = client.get_collection(name="safety_rules")
-        
-        # 2. 껍데기만 있고 데이터가 0개면 에러 발생시켜서 다시 만들게 유도
         if collection.count() == 0:
             raise ValueError("데이터베이스가 비어있습니다.")
-            
         return collection
 
     except Exception:
-        # 3. 데이터가 아예 없거나 에러가 나면 여기서 즉시 새로 구축
-        st.toast("⚠️ 법령 데이터베이스를 처음 구축하는 중입니다. (약 30~60초 소요)")
+        # 2. 데이터가 없으면 새로 구축 (여기서는 화면 출력 금지, 콘솔에만 출력)
+        print("⚠️ 데이터베이스를 새로 구축합니다...")
         collection = client.get_or_create_collection(name="safety_rules")
         
         file_list = ["법.txt", "시행령.txt", "시행규칙.txt", "안전보건기준.txt", "중대재해처벌법.txt"]
@@ -65,21 +62,21 @@ def load_db():
                         all_documents.append(f"[{law_title}] {doc}")
         
         if all_documents:
-            # 고유 ID 생성 후 DB에 일괄 추가
             ids = [f"rule_v5_{i+1}" for i in range(len(all_documents))]
             collection.add(documents=all_documents, ids=ids)
-            st.toast("✅ 데이터베이스 구축 완료!")
+            print("✅ 데이터베이스 구축 완료!")
         else:
-            st.warning("⚠️ 깃허브 창고에 법령 텍스트 파일(법.txt 등)이 하나도 없습니다! 파일을 올려주세요.")
+            print("❌ 경고: 텍스트 파일이 없습니다.")
             
         return collection
 
-# DB 로딩 실행
-try:
-    collection = load_db()
-except Exception as e:
-    st.error(f"⚠️ 데이터베이스 로드 중 알 수 없는 오류 발생: {e}")
-    st.stop()
+# 💡 화면 바깥쪽에서 로딩 표시 띄우기
+with st.spinner("데이터베이스를 점검 및 준비 중입니다... (최초 1회 약 30초 소요)"):
+    try:
+        collection = load_db()
+    except Exception as e:
+        st.error(f"⚠️ 데이터베이스 로드 중 알 수 없는 오류 발생: {e}")
+        st.stop()
 
 # ==========================================
 # AI 모델 설정
